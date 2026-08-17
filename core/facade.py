@@ -191,6 +191,55 @@ class EnrolmentSystemFacade:
                     "courses_taught": len(taught_courses), "total_students": sum(len(c.enrolled_students) for c in taught_courses)
                 })
         return report
+
+    def search_courses_by_instructor(self, instructor_name: str) -> List[Course]:
+        """Search courses by the instructor's name"""
+        matching_courses = []
+        search_name = instructor_name.lower()
+        
+        for course in self.courses.values():
+            instructor = self.get_user(course.instructor_id)
+            if isinstance(instructor, Faculty) and search_name in instructor.name.lower():
+                matching_courses.append(course)
+                
+        return matching_courses
+
+    def admin_force_enrol(self, admin_id: str, student_id: str, course_id: str) -> tuple[bool, str]:
+        """Administrator override: Force-add a student into a class ignoring validation rules"""
+        admin = self.get_user(admin_id)
+        if not isinstance(admin, Administrator):
+            return False, "Unauthorized: Only administrators can force-enrol"
+        
+        student = self.get_user(student_id)
+        course = self.get_course(course_id)
+        
+        if not isinstance(student, Student): return False, "Invalid student"
+        if not course: return False, "Course not found"
+        if course_id in student.enrolled_courses: return False, "Student already enrolled"
+        
+        
+        self._enrolment_counter += 1
+        enrolment = Enrolment(
+            enrolment_id=f"ENR_{self._enrolment_counter}", 
+            student_id=student_id, 
+            course_id=course_id
+        )
+        
+        enrolment.state = enrolment.state.transition() 
+        self.enrolments[enrolment.enrolment_id] = enrolment
+        
+        student.enrolled_courses.add(course_id)
+        course.enrolled_students.add(student_id)
+        course.available_seats -= 1 
+        
+        self.event_manager.notify_observers("STUDENT_ENROLLED", {
+            "student_id": student_id, 
+            "course_id": course_id, 
+            "enrolment_id": enrolment.enrolment_id,
+            "note": "Forced added by Administrator"
+        })
+        
+        return True, f"Admin {admin.name} successfully force-enrolled {student.name} into {course.name}"
     
     def get_notification_history(self) -> List[Dict]:
         return self.notification_service.get_notification_history()
