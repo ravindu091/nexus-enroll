@@ -101,6 +101,12 @@ def main():
         print(f"    Time: {course.schedule.days} {course.schedule.start_time}-{course.schedule.end_time}")
         print(f"    Location: {course.schedule.location}")
     print()
+
+    print("Searching for courses taught by 'Turing':")
+    turing_courses = system.search_courses_by_instructor("Turing")
+    for course in turing_courses:
+        print(f"  • {course.course_id}: {course.name}")
+    print()
     
     # ========================================================================
     print_section("4. STATE PATTERN DEMONSTRATION - GRADE SUBMISSION")
@@ -131,6 +137,10 @@ def main():
     
     # ========================================================================
     print_section("6. ADMINISTRATOR MODULE - REPORTING & ANALYTICS")
+
+    print("Admin Action: Force-enrolling Carol (S003) into CS201 (Ignoring missing prerequisite)...")
+    success, message = system.admin_force_enrol("A001", "S003", "CS201")
+    print(f"Result: {'[SUCCESS]' if success else '[FAILED]'} {message}\n")
     
     print("Enrolment Report by Department:\n")
     enrolment_report = system.generate_enrolment_report()
