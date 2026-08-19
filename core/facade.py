@@ -17,16 +17,26 @@ from patterns.observer import (
 )
 
 class EnrolmentSystemFacade:
-    """Facade providing simplified interface to core system"""
+    """
+    Facade providing a simplified, unified interface to the core system.
+    Acts as the central orchestrator, managing domain entities and 
+    delegating logic to specialized subsystems (Validator, Factory, EventManager)
+    to ensure architectural decoupling and high cohesion.
+    """
     
     def __init__(self):
+        # Centralized State Management for Domain Entities
         self.users: Dict[str, User] = {}
         self.courses: Dict[str, Course] = {}
         self.enrolments: Dict[str, Enrolment] = {}
         self.grades: Dict[str, CourseGrade] = {}
         
-        # Initialize Event Manager and Observers
+        # Initialize Event Manager and Observers (Observer Pattern Setup)
         self.event_manager = EnrolmentEventManager()
+
+        # The Facade maintains a composition relationship with NotificationService 
+        # for direct data retrieval (e.g., getting history), but relies on the 
+        # event_manager for asynchronous execution to maintain transactional decoupling.
         self.notification_service = NotificationService()
         self.event_manager.attach_observer(self.notification_service)
         
@@ -44,8 +54,11 @@ class EnrolmentSystemFacade:
     
     # ---- USER MANAGEMENT ----
     def add_user(self, user_type: UserType, user_id: str, name: str, email: str, **kwargs) -> User:
+        # Delegation: Utilizes Factory Pattern to abstract complex creation logic
         user = UserFactory.create_user(user_type, user_id, name, email, **kwargs)
         self.users[user_id] = user
+
+        # Event Trigger: Decoupled notification of user creation
         self.event_manager.notify_observers("USER_CREATED", {"user_id": user_id, "type": user_type.value})
         return user
     
@@ -79,30 +92,37 @@ class EnrolmentSystemFacade:
     
     # ---- ENROLMENT MANAGEMENT ----
     def enrol_student(self, student_id: str, course_id: str) -> tuple[bool, str]:
+        """Handles student enrolment with strict 'all-or-nothing' transaction semantics."""
         student = self.get_user(student_id)
         if not isinstance(student, Student): return False, "Invalid student"
         
         course = self.get_course(course_id)
         if not course: return False, "Course not found"
         if course_id in student.enrolled_courses: return False, "Student already enrolled in this course"
-        
+
+        # Strategy Pattern: Dynamically compose validation rules at runtime
         validator = EnrolmentValidator()
         validator.add_strategy(PrerequisiteValidation(course.prerequisites, student.completed_courses))
         validator.add_strategy(CapacityValidation(course.available_seats))
         validator.add_strategy(TimeConflictValidation(course.schedule, self._get_student_schedule_internal(student_id)))
-        
+
+        # Validation Phase: If any check fails, the transaction is immediately aborted
         is_valid, messages = validator.validate_all()
         if not is_valid: return False, messages[0]
-        
+
+        # Execution Phase: State transitions and data persistence
         self._enrolment_counter += 1
         enrolment = Enrolment(enrolment_id=f"ENR_{self._enrolment_counter}", student_id=student_id, course_id=course_id)
+
+        # State Pattern: safely advance the lifecycle from PENDING to CONFIRMED
         enrolment.state = enrolment.state.transition()
         
         self.enrolments[enrolment.enrolment_id] = enrolment
         student.enrolled_courses.add(course_id)
         course.enrolled_students.add(student_id)
         course.available_seats -= 1
-        
+
+        # Event Phase: Transaction is complete. Publish event and yield control.
         self.event_manager.notify_observers("STUDENT_ENROLLED", {
             "student_id": student_id, "course_id": course_id, "enrolment_id": enrolment.enrolment_id
         })
@@ -145,6 +165,7 @@ class EnrolmentSystemFacade:
         return roster
     
     def submit_grade(self, faculty_id: str, student_id: str, course_id: str, grade_value: float) -> tuple[bool, str]:
+        """Handles grade submission and state lifecycle management."""
         faculty = self.get_user(faculty_id)
         course = self.get_course(course_id)
         if not isinstance(faculty, Faculty) or not course or course.instructor_id != faculty_id:
@@ -156,7 +177,8 @@ class EnrolmentSystemFacade:
         
         self._grade_counter += 1
         grade = CourseGrade(grade_id=f"GRD_{self._grade_counter}", student_id=student_id, course_id=course_id, grade_value=grade_value)
-        
+
+        # State Pattern: Safely transition Pending -> Submitted -> Approved
         grade.state = grade.state.transition()
         grade.state = grade.state.transition()
         grade.submitted_date = datetime.now()
@@ -205,7 +227,11 @@ class EnrolmentSystemFacade:
         return matching_courses
 
     def admin_force_enrol(self, admin_id: str, student_id: str, course_id: str) -> tuple[bool, str]:
-        """Administrator override: Force-add a student into a class ignoring validation rules"""
+        """
+        Administrator override: Force-add a student into a class.
+        Intentionally bypasses the EnrolmentValidator (Strategy Pattern) to allow
+        manual overrides of capacity and prerequisite restrictions.
+        """
         admin = self.get_user(admin_id)
         if not isinstance(admin, Administrator):
             return False, "Unauthorized: Only administrators can force-enrol"
@@ -224,7 +250,8 @@ class EnrolmentSystemFacade:
             student_id=student_id, 
             course_id=course_id
         )
-        
+
+        # Proceed directly to state transition without Strategy validation
         enrolment.state = enrolment.state.transition() 
         self.enrolments[enrolment.enrolment_id] = enrolment
         
