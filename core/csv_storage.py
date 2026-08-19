@@ -22,13 +22,15 @@ class CsvStorage:
         self._load_enrolments(system)
         self._load_grades(system)
         self._load_course_change_requests(system)
+        self._load_degree_programs(system)
         return system
 
     def save(self, system: EnrolmentSystemFacade) -> None:
-        self._write_rows("users.csv", ["id", "role", "name", "email", "major", "department", "privilege_level"], (
+        self._write_rows("users.csv", ["id", "role", "name", "email", "major", "department", "privilege_level", "active"], (
             {"id": user.user_id, "role": user.get_user_type(), "name": user.name, "email": user.email,
              "major": getattr(user, "major", ""), "department": getattr(user, "department", ""),
-             "privilege_level": getattr(user, "privilege_level", "")} for user in system.users.values()))
+             "privilege_level": getattr(user, "privilege_level", ""), "active": user.active}
+            for user in system.users.values()))
         self._write_rows("courses.csv", ["id", "name", "description", "instructor_id", "department", "capacity", "semester", "days", "start", "end", "location", "prerequisites"], (
             {"id": course.course_id, "name": course.name, "description": course.description, "instructor_id": course.instructor_id,
              "department": course.department, "capacity": course.capacity, "semester": course.semester, "days": ";".join(sorted(course.schedule.days)),
@@ -47,10 +49,12 @@ class CsvStorage:
                            "prerequisites": ";".join(request["prerequisites"] or []),
                            "capacity": request["capacity"] if request["capacity"] is not None else "",
                            "status": request["status"]} for request in system.course_change_requests))
+        self._write_rows("degree_programs.csv", ["id", "name", "required_courses", "credits"], ({"id": program["program_id"], "name": program["name"], "required_courses": ";".join(f"{course}:{credits}" for course, credits in program["required_courses"].items()), "credits": program["credits"]} for program in system.degree_programs.values()))
 
     def _load_users(self, system):
         for row in self._read_rows("users.csv"):
-            system.add_user(UserType(row["role"]), row["id"], row["name"], row["email"], major=row.get("major", "Undeclared"), department=row.get("department", "General"), privilege_level=int(row.get("privilege_level") or 1))
+            user = system.add_user(UserType(row["role"]), row["id"], row["name"], row["email"], major=row.get("major", "Undeclared"), department=row.get("department", "General"), privilege_level=int(row.get("privilege_level") or 1))
+            user.active = row.get("active", "True").lower() == "true"
 
     def _load_courses(self, system):
         for row in self._read_rows("courses.csv"):
@@ -108,6 +112,17 @@ class CsvStorage:
                 system._change_request_counter = max(system._change_request_counter, int(request_id.split("_")[-1]))
             except ValueError:
                 pass
+
+    def _load_degree_programs(self, system):
+        for row in self._read_rows("degree_programs.csv"):
+            required_courses = {}
+            for item in filter(None, row.get("required_courses", "").split(";")):
+                course_id, credits = item.split(":", 1)
+                required_courses[course_id] = int(credits)
+            system.degree_programs[row["id"]] = {
+                "program_id": row["id"], "name": row["name"],
+                "required_courses": required_courses, "credits": int(row["credits"]),
+            }
 
     def _read_rows(self, filename):
         path = self.data_directory / filename

@@ -31,6 +31,7 @@ class EnrolmentSystemFacade:
         self.enrolments: Dict[str, Enrolment] = {}
         self.grades: Dict[str, CourseGrade] = {}
         self.course_change_requests: List[Dict] = []
+        self.degree_programs: Dict[str, Dict] = {}
         
         # Initialize Event Manager and Observers (Observer Pattern Setup)
         self.event_manager = EnrolmentEventManager()
@@ -66,6 +67,35 @@ class EnrolmentSystemFacade:
     
     def get_user(self, user_id: str) -> Optional[User]:
         return self.users.get(user_id)
+
+    def _is_admin(self, user_id: str) -> bool:
+        return isinstance(self.get_user(user_id), Administrator)
+
+    def update_user(self, admin_id: str, user_id: str, name: str = None,
+                    email: str = None, major: str = None, department: str = None) -> tuple[bool, str]:
+        if not self._is_admin(admin_id):
+            return False, "Only administrators can edit accounts"
+        user = self.get_user(user_id)
+        if not user:
+            return False, "User not found"
+        if name is not None:
+            user.name = name
+        if email is not None:
+            user.email = email
+        if isinstance(user, Student) and major is not None:
+            user.major = major
+        if isinstance(user, Faculty) and department is not None:
+            user.department = department
+        return True, f"Account {user_id} updated"
+
+    def set_user_active(self, admin_id: str, user_id: str, active: bool) -> tuple[bool, str]:
+        if not self._is_admin(admin_id):
+            return False, "Only administrators can change account status"
+        user = self.get_user(user_id)
+        if not user or isinstance(user, Administrator):
+            return False, "Only student and faculty accounts can be activated or deactivated"
+        user.active = active
+        return True, f"Account {user_id} {'activated' if active else 'deactivated'}"
     
     # ---- COURSE MANAGEMENT ----
     def create_course(self, course_id: str, name: str, description: str, instructor_id: str, 
@@ -92,12 +122,53 @@ class EnrolmentSystemFacade:
 
     def get_courses_by_instructor(self, instructor_id: str) -> List[Course]:
         return [c for c in self.courses.values() if c.instructor_id == instructor_id]
+
+    # ---- DEGREE PROGRAM MANAGEMENT ----
+    def create_degree_program(self, admin_id: str, program_id: str, name: str,
+                              required_courses: Dict[str, int]) -> tuple[bool, str]:
+        if not self._is_admin(admin_id):
+            return False, "Only administrators can manage degree programs"
+        if program_id in self.degree_programs:
+            return False, "Degree program already exists"
+        if not required_courses or any(course_id not in self.courses or credits <= 0
+                                       for course_id, credits in required_courses.items()):
+            return False, "Each required course must exist and have positive credits"
+        self.degree_programs[program_id] = {
+            "program_id": program_id, "name": name,
+            "required_courses": dict(required_courses), "credits": sum(required_courses.values()),
+        }
+        return True, f"Degree program {program_id} created"
+
+    def update_degree_program(self, admin_id: str, program_id: str, name: str = None,
+                              required_courses: Dict[str, int] = None) -> tuple[bool, str]:
+        if not self._is_admin(admin_id):
+            return False, "Only administrators can manage degree programs"
+        program = self.degree_programs.get(program_id)
+        if not program:
+            return False, "Degree program not found"
+        if required_courses is not None and (not required_courses or any(course_id not in self.courses or credits <= 0
+                                                                         for course_id, credits in required_courses.items())):
+            return False, "Each required course must exist and have positive credits"
+        if name is not None:
+            program["name"] = name
+        if required_courses is not None:
+            program["required_courses"] = dict(required_courses)
+            program["credits"] = sum(required_courses.values())
+        return True, f"Degree program {program_id} updated"
+
+    def delete_degree_program(self, admin_id: str, program_id: str) -> tuple[bool, str]:
+        if not self._is_admin(admin_id):
+            return False, "Only administrators can manage degree programs"
+        if program_id not in self.degree_programs:
+            return False, "Degree program not found"
+        del self.degree_programs[program_id]
+        return True, f"Degree program {program_id} deleted"
     
     # ---- ENROLMENT MANAGEMENT ----
     def enrol_student(self, student_id: str, course_id: str) -> tuple[bool, str]:
         """Handles student enrolment with strict 'all-or-nothing' transaction semantics."""
         student = self.get_user(student_id)
-        if not isinstance(student, Student): return False, "Invalid student"
+        if not isinstance(student, Student) or not student.active: return False, "Invalid or inactive student"
         
         course = self.get_course(course_id)
         if not course: return False, "Course not found"
@@ -183,7 +254,7 @@ class EnrolmentSystemFacade:
         """Handles grade submission and state lifecycle management."""
         faculty = self.get_user(faculty_id)
         course = self.get_course(course_id)
-        if not isinstance(faculty, Faculty) or not course or course.instructor_id != faculty_id:
+        if not isinstance(faculty, Faculty) or not faculty.active or not course or course.instructor_id != faculty_id:
             return False, "Unauthorized or invalid inputs"
         
         student = self.get_user(student_id)
@@ -196,7 +267,7 @@ class EnrolmentSystemFacade:
             if existing_grade.state.get_status() == "APPROVED":
                 return False, "An approved grade cannot be changed"
             existing_grade.grade_value = grade_value
-            return True, f"Grade {grade_value} corrected for {student_id}; awaiting approval"
+            return True, f"Grade {grade_value} corrected for {student_id}; Grade ID: {existing_grade.grade_id}; awaiting approval"
         
         self._grade_counter += 1
         grade = CourseGrade(grade_id=f"GRD_{self._grade_counter}", student_id=student_id, course_id=course_id, grade_value=grade_value)
@@ -208,7 +279,7 @@ class EnrolmentSystemFacade:
         self.grades[grade.grade_id] = grade
         
         self.event_manager.notify_observers("GRADE_SUBMITTED", {"student_id": student_id, "course_id": course_id, "grade": grade_value})
-        return True, f"Grade {grade_value} submitted for {student_id}; awaiting approval"
+        return True, f"Grade {grade_value} submitted for {student_id}; Grade ID: {grade.grade_id}; awaiting approval"
 
     def submit_grades_batch(self, faculty_id: str, course_id: str, grade_entries: List[tuple[str, float]]) -> List[tuple[str, bool, str]]:
         """Processes each grade independently, preserving valid submissions if one fails."""
@@ -238,7 +309,7 @@ class EnrolmentSystemFacade:
                                      prerequisites: set = None, capacity: int = None) -> tuple[bool, str]:
         faculty = self.get_user(faculty_id)
         course = self.get_course(course_id)
-        if not isinstance(faculty, Faculty) or not course or course.instructor_id != faculty_id:
+        if not isinstance(faculty, Faculty) or not faculty.active or not course or course.instructor_id != faculty_id:
             return False, "Unauthorized or invalid course"
         if not request and description is None and prerequisites is None and capacity is None:
             return False, "At least one course change is required"
@@ -283,18 +354,38 @@ class EnrolmentSystemFacade:
         return True, f"Course change request {request_id} approved"
     
     # ---- ADMINISTRATOR OPERATIONS ----
-    def generate_enrolment_report(self, department: str = None) -> Dict:
-        report = {"timestamp": datetime.now().isoformat(), "departments": {}}
-        filtered_courses = (self.courses.values() if not department else [c for c in self.courses.values() if c.department == department])
+    def generate_enrolment_report(self, department: str = None, semester: str = None,
+                                  minimum_utilization: float = None) -> Dict:
+        report = {"timestamp": datetime.now().isoformat(), "filters": {
+            "department": department, "semester": semester,
+            "minimum_utilization": minimum_utilization,
+        }, "departments": {}}
+        filtered_courses = [course for course in self.courses.values()
+                            if (not department or course.department.lower() == department.lower())
+                            and (not semester or course.semester.lower() == semester.lower())
+                            and (minimum_utilization is None or course.capacity == 0 or
+                                 len(course.enrolled_students) / course.capacity >= minimum_utilization)]
         
         for course in filtered_courses:
             dept = course.department
             if dept not in report["departments"]: report["departments"][dept] = []
             report["departments"][dept].append({
                 "course_id": course.course_id, "name": course.name, "enrolled": len(course.enrolled_students),
-                "capacity": course.capacity, "utilization": f"{(len(course.enrolled_students)/course.capacity)*100:.1f}%"
+                "capacity": course.capacity, "semester": course.semester,
+                "utilization": f"{(len(course.enrolled_students)/course.capacity)*100:.1f}%"
             })
         return report
+
+    def generate_course_popularity_report(self, semester: str = None) -> Dict:
+        courses = [course for course in self.courses.values()
+                   if not semester or course.semester.lower() == semester.lower()]
+        popularity = [{"course_id": course.course_id, "name": course.name,
+                       "department": course.department, "semester": course.semester,
+                       "enrolled": len(course.enrolled_students), "capacity": course.capacity,
+                       "utilization": f"{(len(course.enrolled_students) / course.capacity) * 100:.1f}%"}
+                      for course in courses]
+        popularity.sort(key=lambda course: course["enrolled"], reverse=True)
+        return {"timestamp": datetime.now().isoformat(), "semester": semester, "courses": popularity}
     
     def generate_faculty_workload_report(self) -> Dict:
         report = {"timestamp": datetime.now().isoformat(), "faculty": []}
@@ -332,7 +423,7 @@ class EnrolmentSystemFacade:
         student = self.get_user(student_id)
         course = self.get_course(course_id)
         
-        if not isinstance(student, Student): return False, "Invalid student"
+        if not isinstance(student, Student) or not student.active: return False, "Invalid or inactive student"
         if not course: return False, "Course not found"
         if course_id in student.enrolled_courses: return False, "Student already enrolled"
         

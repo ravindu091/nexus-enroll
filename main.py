@@ -171,8 +171,8 @@ def create_course(system, storage):
 def administrator_menu(system, storage, admin):
     while True:
         title("ADMINISTRATOR PORTAL")
-        menu("[1] Add user          [2] Create course\n[3] Edit course       [4] Delete course\n[5] Force-enrol       [6] Enrolment report\n[7] Faculty workload  [8] Approve grades\n[9] Approve course changes\n[0] Logout")
-        choice = select("Enter number: ", set("0123456789"))
+        menu("[1] Add user          [2] Create course\n[3] Edit course       [4] Delete course\n[5] Force-enrol       [6] Enrolment report\n[7] Faculty workload  [8] Approve grades\n[9] Approve course changes\n[10] Account management\n[11] Degree programs\n[12] Analytics\n[0] Logout")
+        choice = select("Enter number: ", {str(number) for number in range(13)})
         if choice == "0": return
         if choice == "1":
             role = select("1 Student  2 Faculty  3 Administrator: ", {"1", "2", "3"}); user_id = input("ID (e.g. S002 / F002 / A002): ").upper()
@@ -186,18 +186,25 @@ def administrator_menu(system, storage, admin):
             course = system.get_course(input("Course ID (e.g. CS101): ").upper())
             if not course: print("Course not found."); continue
             description, capacity = input(f"New description (blank keeps current): "), input(f"New capacity [{course.capacity}] (blank keeps current): ")
-            if description: course.description = description
-            if capacity.isdigit() and int(capacity) >= len(course.enrolled_students): course.available_seats += int(capacity) - course.capacity; course.capacity = int(capacity)
-            storage.save(system); print("Course updated.")
+            semester = input(f"Semester [{course.semester}] (blank keeps current): ")
+            prerequisites = input("Prerequisites (blank keeps current, comma-separated): ")
+            try: new_capacity = int(capacity) if capacity else None
+            except ValueError: error("Capacity must be a whole number."); continue
+            success, message = system.update_course(admin.user_id, course.course_id, description or None, new_capacity,
+                                                    {item.strip().upper() for item in prerequisites.split(",") if item.strip()} if prerequisites else None,
+                                                    semester or None)
+            notice_success(message) if success else error(message)
+            if success: storage.save(system)
         elif choice == "4":
-            course_id = input("Course ID (e.g. CS101): ").upper(); course = system.get_course(course_id)
-            if course and not course.enrolled_students: del system.courses[course_id]; storage.save(system); print("Course deleted.")
-            else: print("Course not found or has enrolled students.")
+            success, message = system.delete_course(admin.user_id, input("Course ID (e.g. CS101): ").upper())
+            notice_success(message) if success else error(message)
+            if success: storage.save(system)
         elif choice == "5":
             success, message = system.admin_force_enrol(admin.user_id, input("Student ID (e.g. S001): ").upper(), input("Course ID (e.g. CS101): ").upper()); notice_success(message) if success else error(message)
             if success: storage.save(system)
         elif choice == "6":
-            report = system.generate_enrolment_report(input("Department (blank for all): ") or None)
+            report = system.generate_enrolment_report(input("Department (blank for all): ") or None,
+                                                       input("Semester (blank for all): ") or None)
             for department, courses in report["departments"].items():
                 print(department)
                 for course in courses: print(f"  {course['course_id']}: {course['enrolled']}/{course['capacity']} ({course['utilization']})")
@@ -214,14 +221,48 @@ def administrator_menu(system, storage, admin):
                 notice_success(message) if success else error(message)
                 if success: storage.save(system)
         else:
-            pending = system.get_pending_course_change_requests()
-            for request in pending:
-                print(f"{request['request_id']}: {request['course_id']} | description={request['description'] or '-'} | prerequisites={','.join(request['prerequisites'] or []) or '-'} | capacity={request['capacity'] or '-'}")
-            request_id = input("Request ID to approve (blank to cancel): ").strip().upper()
-            if request_id:
-                success, message = system.approve_course_change_request(admin.user_id, request_id)
+            if choice == "10":
+                user_id = input("User ID: ").upper(); user = system.get_user(user_id)
+                if not user: error("User not found."); continue
+                action = select("[1] Edit  [2] Deactivate  [3] Activate\nEnter number: ", {"1", "2", "3"})
+                if action == "1":
+                    name, email = input(f"Name [{user.name}]: "), input(f"Email [{user.email}]: ")
+                    details = {"major": input(f"Major [{getattr(user, 'major', '')}]: ")} if isinstance(user, Student) else {"department": input(f"Department [{getattr(user, 'department', '')}]: ")}
+                    success, message = system.update_user(admin.user_id, user_id, name or None, email or None, **{key: value for key, value in details.items() if value})
+                else:
+                    success, message = system.set_user_active(admin.user_id, user_id, action == "3")
                 notice_success(message) if success else error(message)
                 if success: storage.save(system)
+            elif choice == "11":
+                program_id, name = input("Program ID: ").upper(), input("Program name: ")
+                required = {}
+                for item in input("Required courses as COURSE:CREDITS, comma-separated: ").split(","):
+                    if item.strip():
+                        try: course_id, credits = item.strip().upper().split(":", 1); required[course_id] = int(credits)
+                        except ValueError: error("Use COURSE:CREDITS format."); required = {}; break
+                if required:
+                    success, message = system.create_degree_program(admin.user_id, program_id, name, required)
+                    notice_success(message) if success else error(message)
+                    if success: storage.save(system)
+            elif choice == "12":
+                report_type = select("[1] Over 90% capacity  [2] Course popularity\nEnter number: ", {"1", "2"})
+                if report_type == "1":
+                    report = system.generate_enrolment_report(input("Department: ") or None, input("Semester (blank for all): ") or None, 0.9)
+                    for department, courses in report["departments"].items():
+                        print(department)
+                        for course in courses: print(f"  {course['course_id']} | {course['name']} | {course['enrolled']}/{course['capacity']} | {course['utilization']}")
+                else:
+                    for course in system.generate_course_popularity_report(input("Semester (blank for all): ") or None)["courses"]:
+                        print(f"  {course['course_id']} | {course['name']} | {course['enrolled']}/{course['capacity']} | {course['utilization']}")
+            else:
+                pending = system.get_pending_course_change_requests()
+                for request in pending:
+                    print(f"{request['request_id']}: {request['course_id']} | description={request['description'] or '-'} | prerequisites={','.join(request['prerequisites'] or []) or '-'} | capacity={request['capacity'] or '-'}")
+                request_id = input("Request ID to approve (blank to cancel): ").strip().upper()
+                if request_id:
+                    success, message = system.approve_course_change_request(admin.user_id, request_id)
+                    notice_success(message) if success else error(message)
+                    if success: storage.save(system)
 
 
 def seed(system, storage):
@@ -268,7 +309,7 @@ def main():
         if role == "0": notice_success("Goodbye."); return
         example_id = {"1": "S001", "2": "F001", "3": "A001"}[role]
         user = system.get_user(input(f"Enter your ID (e.g. {example_id}): ").upper()); expected = {"1": Student, "2": Faculty, "3": Administrator}[role]
-        if not isinstance(user, expected): error("Login failed: the ID does not match that role."); continue
+        if not isinstance(user, expected) or not getattr(user, "active", False): error("Login failed: the account is invalid or inactive."); continue
         {"1": student_menu, "2": faculty_menu, "3": administrator_menu}[role](system, storage, user)
 
 

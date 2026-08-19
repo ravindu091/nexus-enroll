@@ -1,6 +1,6 @@
-id,role,name,email,major,department,privilege_level
-S001,student,Alice Johnson,alice@nexus.edu,Computer Science,,
-F001,faculty,Dr. Alan Turing,turing@nexus.edu,,Computer Science,
-A001,administrator,System Admin,admin@nexus.edu,,,3
-F002,faculty,Dr. Emmy Noether,noether@nexus.edu,,Mathematics,
-F003,faculty,Dr. Peter Drucker,drucker@nexus.edu,,Business,
+id,role,name,email,major,department,privilege_level,active
+S001,student,Alice Johnson,alice@nexus.edu,Computer Science,,,True
+F001,faculty,Dr. Alan Turing,turing@nexus.edu,,Computer Science,,True
+A001,administrator,System Admin,admin@nexus.edu,,,3,True
+F002,faculty,Dr. Emmy Noether,noether@nexus.edu,,Mathematics,,True
+F003,faculty,Dr. Peter Drucker,drucker@nexus.edu,,Business,,True
