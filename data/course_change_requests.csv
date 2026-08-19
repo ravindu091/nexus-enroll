@@ -1,0 +1,2 @@
+id,faculty_id,course_id,request,description,prerequisites,capacity,status
+CR_1,F001,CS101,hi,,,,PENDING

@@ -30,6 +30,7 @@ class EnrolmentSystemFacade:
         self.courses: Dict[str, Course] = {}
         self.enrolments: Dict[str, Enrolment] = {}
         self.grades: Dict[str, CourseGrade] = {}
+        self.course_change_requests: List[Dict] = []
         
         # Initialize Event Manager and Observers (Observer Pattern Setup)
         self.event_manager = EnrolmentEventManager()
@@ -51,6 +52,7 @@ class EnrolmentSystemFacade:
         
         self._enrolment_counter = 0
         self._grade_counter = 0
+        self._change_request_counter = 0
     
     # ---- USER MANAGEMENT ----
     def add_user(self, user_type: UserType, user_id: str, name: str, email: str, **kwargs) -> User:
@@ -67,11 +69,12 @@ class EnrolmentSystemFacade:
     
     # ---- COURSE MANAGEMENT ----
     def create_course(self, course_id: str, name: str, description: str, instructor_id: str, 
-                      department: str, capacity: int, schedule: CourseSchedule, prerequisites: set = None) -> Course:
+                      department: str, capacity: int, schedule: CourseSchedule, prerequisites: set = None,
+                      semester: str = "2026 Semester 2") -> Course:
         course = Course(
             course_id=course_id, name=name, description=description, instructor_id=instructor_id,
             department=department, capacity=capacity, available_seats=capacity, schedule=schedule,
-            prerequisites=prerequisites or set()
+            semester=semester, prerequisites=prerequisites or set()
         )
         self.courses[course_id] = course
         self.event_manager.notify_observers("COURSE_CREATED", {"course_id": course_id, "name": name})
@@ -108,7 +111,8 @@ class EnrolmentSystemFacade:
 
         # Validation Phase: If any check fails, the transaction is immediately aborted
         is_valid, messages = validator.validate_all()
-        if not is_valid: return False, messages[0]
+        if not is_valid:
+            return False, f"Enrolment denied: {messages[-1]}"
 
         # Execution Phase: State transitions and data persistence
         self._enrolment_counter += 1
@@ -126,7 +130,10 @@ class EnrolmentSystemFacade:
         self.event_manager.notify_observers("STUDENT_ENROLLED", {
             "student_id": student_id, "course_id": course_id, "enrolment_id": enrolment.enrolment_id
         })
-        return True, f"Successfully enrolled in {course.name}"
+        return True, (
+            f"Enrolment confirmed for {course.name}. "
+            "Your schedule and academic enrolment record have been updated."
+        )
     
     def drop_course(self, student_id: str, course_id: str) -> tuple[bool, str]:
         student = self.get_user(student_id)
@@ -147,6 +154,14 @@ class EnrolmentSystemFacade:
         student = self.get_user(student_id)
         if not isinstance(student, Student): return []
         return [self.get_course(cid) for cid in student.enrolled_courses if self.get_course(cid)]
+
+    def get_student_past_schedule(self, student_id: str) -> List[Course]:
+        """Returns completed courses that are no longer part of the active schedule."""
+        student = self.get_user(student_id)
+        if not isinstance(student, Student):
+            return []
+        return [self.get_course(course_id) for course_id in student.completed_courses
+                if course_id not in student.enrolled_courses and self.get_course(course_id)]
     
     def _get_student_schedule_internal(self, student_id: str) -> List[CourseSchedule]:
         return [c.schedule for c in self.get_student_schedule(student_id)]
@@ -172,22 +187,100 @@ class EnrolmentSystemFacade:
             return False, "Unauthorized or invalid inputs"
         
         student = self.get_user(student_id)
-        if not isinstance(student, Student) or not (0 <= grade_value <= 4.0):
+        if not isinstance(student, Student) or student_id not in course.enrolled_students or not (0 <= grade_value <= 4.0):
             return False, "Invalid student or grade"
+
+        existing_grade = next((grade for grade in self.grades.values()
+                               if grade.student_id == student_id and grade.course_id == course_id), None)
+        if existing_grade:
+            if existing_grade.state.get_status() == "APPROVED":
+                return False, "An approved grade cannot be changed"
+            existing_grade.grade_value = grade_value
+            return True, f"Grade {grade_value} corrected for {student_id}; awaiting approval"
         
         self._grade_counter += 1
         grade = CourseGrade(grade_id=f"GRD_{self._grade_counter}", student_id=student_id, course_id=course_id, grade_value=grade_value)
 
-        # State Pattern: Safely transition Pending -> Submitted -> Approved
-        grade.state = grade.state.transition()
+        # State Pattern: Safely transition Pending -> Submitted for approval.
         grade.state = grade.state.transition()
         grade.submitted_date = datetime.now()
         
         self.grades[grade.grade_id] = grade
-        student.completed_courses[course_id] = grade_value
         
         self.event_manager.notify_observers("GRADE_SUBMITTED", {"student_id": student_id, "course_id": course_id, "grade": grade_value})
-        return True, f"Grade {grade_value} submitted for student {student_id}"
+        return True, f"Grade {grade_value} submitted for {student_id}; awaiting approval"
+
+    def submit_grades_batch(self, faculty_id: str, course_id: str, grade_entries: List[tuple[str, float]]) -> List[tuple[str, bool, str]]:
+        """Processes each grade independently, preserving valid submissions if one fails."""
+        return [(student_id, *self.submit_grade(faculty_id, student_id, course_id, grade_value))
+                for student_id, grade_value in grade_entries]
+
+    def get_pending_grades(self) -> List[CourseGrade]:
+        return [grade for grade in self.grades.values() if grade.state.get_status() == "SUBMITTED"]
+
+    def approve_grade(self, admin_id: str, grade_id: str) -> tuple[bool, str]:
+        admin = self.get_user(admin_id)
+        grade = self.grades.get(grade_id)
+        if not isinstance(admin, Administrator):
+            return False, "Only administrators can approve grades"
+        if not grade or grade.state.get_status() != "SUBMITTED":
+            return False, "Pending grade submission not found"
+        student = self.get_user(grade.student_id)
+        if not isinstance(student, Student):
+            return False, "Student record not found"
+        grade.state = grade.state.transition()
+        student.completed_courses[grade.course_id] = grade.grade_value
+        self.event_manager.notify_observers("GRADE_APPROVED", {"student_id": grade.student_id, "course_id": grade.course_id, "grade": grade.grade_value})
+        return True, f"Grade {grade_id} approved and academic record updated"
+
+    def submit_course_change_request(self, faculty_id: str, course_id: str,
+                                     request: str = "", description: str = None,
+                                     prerequisites: set = None, capacity: int = None) -> tuple[bool, str]:
+        faculty = self.get_user(faculty_id)
+        course = self.get_course(course_id)
+        if not isinstance(faculty, Faculty) or not course or course.instructor_id != faculty_id:
+            return False, "Unauthorized or invalid course"
+        if not request and description is None and prerequisites is None and capacity is None:
+            return False, "At least one course change is required"
+        if capacity is not None and (capacity < len(course.enrolled_students) or capacity <= 0):
+            return False, "Capacity must be positive and cannot be below current enrolment"
+
+        self._change_request_counter += 1
+        change_request = {
+            "request_id": f"CR_{self._change_request_counter}",
+            "faculty_id": faculty_id,
+            "course_id": course_id,
+            "request": request,
+            "description": description,
+            "prerequisites": sorted(prerequisites) if prerequisites is not None else None,
+            "capacity": capacity,
+            "status": "PENDING",
+        }
+        self.course_change_requests.append(change_request)
+        return True, f"Course change request {change_request['request_id']} submitted for approval"
+
+    def get_pending_course_change_requests(self) -> List[Dict]:
+        return [request for request in self.course_change_requests if request["status"] == "PENDING"]
+
+    def approve_course_change_request(self, admin_id: str, request_id: str) -> tuple[bool, str]:
+        if not isinstance(self.get_user(admin_id), Administrator):
+            return False, "Only administrators can approve course changes"
+        change_request = next((request for request in self.course_change_requests
+                               if request["request_id"] == request_id), None)
+        if not change_request or change_request["status"] != "PENDING":
+            return False, "Pending course change request not found"
+        course = self.get_course(change_request["course_id"])
+        if not course:
+            return False, "Course not found"
+        if change_request["description"] is not None:
+            course.description = change_request["description"]
+        if change_request["prerequisites"] is not None:
+            course.prerequisites = set(change_request["prerequisites"])
+        if change_request["capacity"] is not None:
+            course.available_seats += change_request["capacity"] - course.capacity
+            course.capacity = change_request["capacity"]
+        change_request["status"] = "APPROVED"
+        return True, f"Course change request {request_id} approved"
     
     # ---- ADMINISTRATOR OPERATIONS ----
     def generate_enrolment_report(self, department: str = None) -> Dict:

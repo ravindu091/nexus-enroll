@@ -13,6 +13,7 @@ class User(ABC):
         self.user_id = user_id
         self.name = name
         self.email = email
+        self.active = True
     
     @abstractmethod
     def get_user_type(self) -> str:

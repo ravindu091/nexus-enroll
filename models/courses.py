@@ -23,6 +23,7 @@ class Course:
     capacity: int
     available_seats: int
     schedule: CourseSchedule
+    semester: str = "2026 Semester 2"
     prerequisites: Set[str] = field(default_factory=set)
     enrolled_students: Set[str] = field(default_factory=set)
     waitlisted_students: List[str] = field(default_factory=list)
