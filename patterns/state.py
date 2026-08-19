@@ -1,9 +1,14 @@
 from abc import ABC, abstractmethod
 
 class EnrolmentState(ABC):
-    """Abstract state for enrolment"""
+    """
+    Abstract state for the enrolment lifecycle.
+    Encapsulates state-specific behavior, ensuring the Context (Enrolment entity)
+    cannot bypass mandatory workflow stages.
+    """
     @abstractmethod
     def transition(self) -> 'EnrolmentState':
+        """Forces concrete states to define their forward progression."""
         pass
     
     @abstractmethod
@@ -11,9 +16,9 @@ class EnrolmentState(ABC):
         pass
 
 class CompletedEnrolment(EnrolmentState):
-    """Completed state"""
+    """Completed state: Acts as a terminal node in the state machine."""
     def transition(self) -> EnrolmentState:
-        return self  # Final state
+        return self  # Final state, prevents further invalid transitions
     
     def get_status(self) -> str:
         return "COMPLETED"

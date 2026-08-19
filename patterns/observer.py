@@ -7,10 +7,13 @@ if TYPE_CHECKING:
     from core.facade import EnrolmentSystemFacade
 
 class Observer(ABC):
-    """Observer interface for notification system"""
+    """
+    Observer interface for the event-driven architecture.
+    Provides a standardized contract (Liskov Substitution Principle) for all auxiliary tasks.
+    """
     @abstractmethod
     def update(self, event: str, data: Dict) -> None:
-        """Called when an event occurs"""
+        """Called by the EventManager when a system event occurs"""
         pass
 
 class NotificationService(Observer):
@@ -51,12 +54,17 @@ class EnrolmentEventManager:
             observer.update(event, data)
 
 class WaitlistObserver(Observer):
-    """Concrete Observer: Listens for course drops and notifies waitlisted students"""
+    """
+    Concrete Observer: Listens for course drops and notifies waitlisted students.
+    Demonstrates Single Responsibility Principle: Moves complex waitlist queue processing 
+    out of the main 'drop_course' transaction.
+    """
     def __init__(self, facade: 'EnrolmentSystemFacade'):
         self.facade = facade 
     
     def update(self, event: str, data: Dict) -> None:
         if event == "COURSE_DROPPED":
+            # Decoupled Execution: Processes waitlist only after course drop is confirmed
             course_id = data.get("course_id")
             course = self.facade.get_course(course_id)
             if course and course.waitlisted_students:
@@ -72,7 +80,10 @@ class WaitlistObserver(Observer):
 
 
 class AdvisorObserver(Observer):
-    """Concrete Observer: Notifies academic advisors when advisees drop critical courses"""
+    """
+    Concrete Observer: Notifies academic advisors when advisees drop critical courses.
+    Ensures the core enrolment engine does not need to query advisor relationships.
+    """
     def __init__(self, facade: 'EnrolmentSystemFacade'):
         self.facade = facade
     
@@ -81,6 +92,7 @@ class AdvisorObserver(Observer):
             student_id = data.get("student_id")
             course_id = data.get("course_id")
             student = self.facade.get_user(student_id)
+            # Auxiliary Logic: Checks specific student properties asynchronously
             if isinstance(student, Student) and course_id in student.critical_courses:
                 if student.advisor_id:
                     self.facade.event_manager.notify_observers(

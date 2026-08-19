@@ -3,10 +3,18 @@ from typing import Dict, List, Set
 from models.courses import CourseSchedule
 
 class ValidationStrategy(ABC):
-    """Abstract validation strategy"""
+    """
+    Abstract validation strategy.
+    Adheres to the Open/Closed Principle: New validation rules can be added 
+    by creating new subclasses without modifying the EnrolmentValidator core logic.
+    """
     @abstractmethod
     def validate(self, context: Dict) -> tuple[bool, str]:
-        """Returns (is_valid, message)"""
+        """
+        Executes the specific validation rule.
+        Returns (is_valid, message). The 'context' dict allows for future extensibility 
+        without changing the method signature.
+        """
         pass
 
 class PrerequisiteValidation(ValidationStrategy):
@@ -56,15 +64,23 @@ class TimeConflictValidation(ValidationStrategy):
         return not (end1 <= start2 or end2 <= start1)
 
 class EnrolmentValidator:
-    """Validator using strategy pattern"""
+    """
+    Context manager utilizing the Strategy pattern.
+    Decouples the business rule algorithms from the main Facade transaction logic.
+    """
     def __init__(self):
         self.strategies: List[ValidationStrategy] = []
     
     def add_strategy(self, strategy: ValidationStrategy) -> None:
+        """Dynamically compose validation rules at runtime (Composition over Inheritance)."""
         self.strategies.append(strategy)
     
     def validate_all(self) -> tuple[bool, List[str]]:
-        """Validate using all strategies"""
+        """
+        Validate using all attached strategies.
+        Enforces the 'all-or-nothing' transaction requirement: if a single strategy fails, 
+        it immediately returns False, preventing partial state changes.
+        """
         messages = []
         for strategy in self.strategies:
             is_valid, message = strategy.validate({})

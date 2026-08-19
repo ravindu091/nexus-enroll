@@ -22,7 +22,8 @@ def main():
     system = EnrolmentSystemFacade()
     
     print_section("1. SETTING UP SAMPLE DATA")
-    
+
+    # Demonstrating the Factory Pattern for user creation
     print("Creating users...")
     system.add_user(UserType.STUDENT, "S001", "Alice Johnson", "alice@nexus.edu", major="Computer Science")
     system.add_user(UserType.STUDENT, "S002", "Bob Smith", "bob@nexus.edu", major="Computer Science")
@@ -66,11 +67,13 @@ def main():
     print("TEST 2: Bob enrolls in MATH101")
     success, message = system.enrol_student("S002", "MATH101")
     print(f"Result: {'[SUCCESS]' if success else '[FAILED]'} {message}\n")
-    
+
+    # Strategy Pattern in action: TimeConflictValidation prevents this
     print("TEST 3: Alice enrolls in MATH101 (different schedule from CS101)")
     success, message = system.enrol_student("S001", "MATH101")
     print(f"Result: {'[SUCCESS]' if success else '[FAILED]'} {message}\n")
-    
+
+    # Strategy Pattern in action: PrerequisiteValidation fails (Alice hasn't completed CS101 yet)
     print("TEST 4: Alice tries CS201 (requires CS101 - should succeed now as she took it)")
     success, message = system.enrol_student("S001", "CS201")
     print(f"Result: {'[SUCCESS]' if success else '[FAILED]'} {message}\n")
