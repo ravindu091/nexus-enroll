@@ -1,0 +1,8 @@
+id,role,name,email,major,department,privilege_level,active
+S001,student,Ravindu Dilupa,ravindu@ucsc.edu,Computer Science,,,True
+S002,student,Dinod Alwis,dinod@ucsc.edu,Computer Science,,,True
+S003,student,Isum Hansana,isum@ucsc.edu,Computer Science,,,True
+F001,faculty,Dr. Sarath Hewage,cs@ucsc.edu,,Computer Science,,True
+A001,administrator,System Admin,admin@ucsc.edu,,,3,True
+F002,faculty,Dr. Rohan Gamage,kw@ucsc.edu,,Mathematics,,True
+F003,faculty,Dr. Eran Ranasinghe,rp@ucsc.edu,,Business,,True

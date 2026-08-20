@@ -1,0 +1,8 @@
+id,name,description,instructor_id,department,capacity,semester,days,start,end,location,prerequisites
+CS101,Introduction to Computer Science,Programming fundamentals,F001,Computer Science,30,2026 Semester 2,MON;WED,09:00,10:30,Tech 101,
+CS201,Data Structures,"Lists, trees, graphs, and algorithm design.",F001,Computer Science,25,2026 Semester 2,THU;TUE,11:00,12:30,Tech 201,CS101
+CS301,Database Systems,"Relational modelling, SQL, and transaction management.",F001,Computer Science,20,2026 Semester 2,MON;WED,13:00,14:30,Tech 203,CS201
+MATH101,Calculus I,Differential and integral calculus for science students.,F002,Mathematics,40,2026 Semester 2,THU;TUE,09:00,10:30,Science 301,
+MATH201,Discrete Mathematics,"Logic, sets, combinatorics, and graph theory.",F002,Mathematics,35,2026 Semester 2,MON;WED,11:00,12:30,Science 302,
+BUS101,Principles of Management,Core management concepts and organisational leadership.,F003,Business,45,2026 Semester 2,FRI,09:00,12:00,Business 110,
+CS090,Computing Essentials,Completed foundation course from a previous semester.,F001,Computer Science,30,2026 Semester 1,FRI,13:00,14:30,Tech 100,
